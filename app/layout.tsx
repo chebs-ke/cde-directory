@@ -29,6 +29,8 @@ export default async function RootLayout({
     data: { user },
   } = await supabase.auth.getUser()
 
+  const isAdmin = user?.email === process.env.ADMIN_EMAIL
+
   return (
     <html lang="en">
       <body
@@ -46,6 +48,11 @@ export default async function RootLayout({
 
             {user ? (
               <>
+                {isAdmin && (
+                  <Link href="/admin" className="hover:underline">
+                    Admin
+                  </Link>
+                )}
                 <Link href="/dashboard" className="hover:underline">
                   Dashboard
                 </Link>
