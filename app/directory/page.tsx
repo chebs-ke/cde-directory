@@ -10,21 +10,73 @@ type CDE = {
   bio: string | null
 }
 
-export default async function DirectoryPage() {
-  const { data: cdes, error } = await supabase
+type Service = {
+  id: number
+  name: string
+  slug: string
+}
+
+type PageProps = {
+  searchParams: Promise<{ county?: string; service?: string }>
+}
+
+export default async function DirectoryPage({ searchParams }: PageProps) {
+  const params = await searchParams
+  const selectedCounty = params.county ?? ''
+  const selectedService = params.service ?? ''
+
+  // Fetch services for the dropdown
+  const { data: services } = await supabase
+    .from('services')
+    .select('*')
+    .order('name')
+
+  // Fetch distinct counties from CDEs for the dropdown
+  const { data: countyRows } = await supabase
+    .from('cdes')
+    .select('county')
+    .eq('verified', true)
+
+  const counties = Array.from(
+    new Set((countyRows ?? []).map((r) => r.county))
+  ).sort()
+
+  // Build the CDE query
+  let query = supabase
     .from('cdes')
     .select('id, name, county, market_center, phone, email, bio')
     .eq('verified', true)
-    .order('name')
 
-  if (error) {
-    return (
-      <main className="p-8">
-        <h1 className="text-xl font-bold text-red-600">Supabase error</h1>
-        <pre className="mt-4 p-4 bg-gray-100 rounded text-black">{error.message}</pre>
-      </main>
-    )
+  if (selectedCounty) {
+    query = query.eq('county', selectedCounty)
   }
+
+  if (selectedService) {
+    // Find CDE ids that offer this service, then filter
+    const { data: serviceRow } = await supabase
+      .from('services')
+      .select('id')
+      .eq('slug', selectedService)
+      .single()
+
+    if (serviceRow) {
+      const { data: links } = await supabase
+        .from('cde_services')
+        .select('cde_id')
+        .eq('service_id', serviceRow.id)
+
+      const cdeIds = (links ?? []).map((l) => l.cde_id)
+
+      if (cdeIds.length === 0) {
+        // No CDEs offer this service; return empty
+        query = query.in('id', ['00000000-0000-0000-0000-000000000000'])
+      } else {
+        query = query.in('id', cdeIds)
+      }
+    }
+  }
+
+  const { data: cdes, error } = await query.order('name')
 
   return (
     <main className="p-8 max-w-4xl mx-auto">
@@ -33,6 +85,75 @@ export default async function DirectoryPage() {
         Find a Community Digital Entrepreneur near you
       </p>
 
+      {/* Filter form */}
+      <form method="get" className="flex flex-wrap gap-4 mb-8 items-end">
+        <div className="flex flex-col">
+          <label htmlFor="county" className="text-sm font-medium mb-1">
+            County
+          </label>
+          <select
+            id="county"
+            name="county"
+            defaultValue={selectedCounty}
+            className="border rounded px-3 py-2 bg-white text-black min-w-[180px]"
+          >
+            <option value="">All counties</option>
+            {counties.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex flex-col">
+          <label htmlFor="service" className="text-sm font-medium mb-1">
+            Service
+          </label>
+          <select
+            id="service"
+            name="service"
+            defaultValue={selectedService}
+            className="border rounded px-3 py-2 bg-white text-black min-w-[220px]"
+          >
+            <option value="">All services</option>
+            {(services as Service[])?.map((s) => (
+              <option key={s.id} value={s.slug}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <button
+          type="submit"
+          className="bg-black text-white px-4 py-2 rounded hover:bg-gray-800"
+        >
+          Filter
+        </button>
+
+        {(selectedCounty || selectedService) && (
+          <a
+            href="/directory"
+            className="text-sm text-blue-600 underline self-center"
+          >
+            Clear
+          </a>
+        )}
+      </form>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 p-4 rounded mb-4">
+          <p className="text-red-700 font-medium">Error: {error.message}</p>
+        </div>
+      )}
+
+      {/* Results count */}
+      <p className="text-sm text-gray-500 mb-4">
+        {cdes?.length ?? 0} result{cdes?.length === 1 ? '' : 's'}
+      </p>
+
+      {/* Results */}
       <div className="space-y-4">
         {(cdes as CDE[])?.map((cde) => (
           <article key={cde.id} className="border rounded-lg p-5">
@@ -48,6 +169,12 @@ export default async function DirectoryPage() {
             </div>
           </article>
         ))}
+
+        {cdes?.length === 0 && (
+          <p className="text-gray-500 italic">
+            No CDEs match your filters. Try broadening your search.
+          </p>
+        )}
       </div>
     </main>
   )
